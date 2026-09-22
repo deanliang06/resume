@@ -30,6 +30,10 @@ class Settings:
         configured = os.getenv("RESUME_ADJUSTER_SOFFICE")
         return configured or shutil.which("soffice") or shutil.which("libreoffice")
 
+    @property
+    def generation_model(self) -> str:
+        return os.getenv("RESUME_ADJUSTER_MODEL", "gpt-5-mini")
+
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(data_root=Path(os.getenv("RESUME_ADJUSTER_DATA", ".resume-adjuster-data")))
@@ -37,4 +41,3 @@ class Settings:
     def initialize(self) -> None:
         self.jobs_root.mkdir(parents=True, exist_ok=True)
         self.results_root.mkdir(parents=True, exist_ok=True)
-

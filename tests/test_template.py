@@ -40,10 +40,10 @@ def test_corrupt_and_unsafe_packages_rejected(tmp_path):
         validate_docx_package(unsafe, 1000)
 
 
-def test_edit_preserves_protected_xml_and_hobbies(template_path, tmp_path, evidence_bank):
+def test_edit_preserves_protected_xml_and_hobbies(template_path, tmp_path, project_generator):
     original, mapping, parsed = parse_resume(template_path)
     before = protected_digest(original, mapping)
-    candidate = tailor(parsed, "Python Go React AWS SQL", evidence_bank)
+    candidate = tailor(parsed, "Python Go React AWS SQL", project_generator)
     output = tmp_path / "tailored.docx"
     apply_tailoring(template_path, output, candidate)
     edited, edited_mapping, edited_parsed = parse_resume(output)
@@ -53,12 +53,11 @@ def test_edit_preserves_protected_xml_and_hobbies(template_path, tmp_path, evide
     assert all(len(project.bullets) >= 2 for project in edited_parsed.projects)
 
 
-def test_three_project_fallback_removes_whole_block(template_path, tmp_path, evidence_bank):
+def test_three_project_fallback_removes_whole_block(template_path, tmp_path, project_generator):
     _, _, parsed = parse_resume(template_path)
-    candidate = tailor(parsed, "Python", evidence_bank)
+    candidate = tailor(parsed, "Python", project_generator)
     candidate.projects.pop()
     output = tmp_path / "three.docx"
     apply_tailoring(template_path, output, candidate)
     _, _, reparsed = parse_resume(output)
     assert len(reparsed.projects) == 3
-

@@ -59,13 +59,21 @@ class FakeConverter:
         pdf.close()
 
 
+class FakeProjectGenerator:
+    provider_name = "test generator"
+
+    def generate(self, job_description: str, count: int):
+        from resume_adjuster.models import Project
+        return [Project(
+            f"hypothetical-{index + 1}",
+            f"Generated System {index + 1} (Hypothetical Project)",
+            None,
+            ["Build a small role-focused service", "Add tests for normal and failure paths", "Document implementation tradeoffs"],
+            20_000 + index,
+            proposed=True,
+        ) for index in range(count)]
+
+
 @pytest.fixture
-def evidence_bank() -> str:
-    return '''{
-      "projects": [
-        {"title":"Beta", "bullets":["Improved Beta throughput"]},
-        {"title":"Gamma", "bullets":["Deployed Gamma to AWS"]},
-        {"title":"Delta", "bullets":["Optimized Delta queries"]}
-      ],
-      "skills": {"Languages":["JS"], "Tools/Infra":["GitHub Actions"]}
-    }'''
+def project_generator():
+    return FakeProjectGenerator()

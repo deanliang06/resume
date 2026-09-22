@@ -1,52 +1,37 @@
 # Resume Adjuster
 
-A local FastAPI website that compares Dean's projects with a job description. Near-perfect matches are retained; remaining slots become clearly labeled, feasible project ideas to build. Proposed bullets describe implementation work and never invent metrics, users, or URLs.
+A local FastAPI website that compares Dean's projects with a job description. Near-perfect matches are retained; the OpenAI API generates remaining slots as clearly labeled hypothetical project plans using a strict schema.
 
 ## Run locally
 
-Requirements: Python 3.11+ and LibreOffice with the Calibri fonts available. The server invokes LibreOffice headlessly and gives every job an isolated profile.
+Requirements: Python 3.11+, LibreOffice, Calibri fonts, and an OpenAI API key.
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\pip install -e ".[test]"
+.\.venv\Scripts\python.exe -m pip install -e ".[test]"
 $env:RESUME_ADJUSTER_SOFFICE = "C:\Program Files\LibreOffice\program\soffice.exe"
-.\.venv\Scripts\python run.py
+$env:OPENAI_API_KEY = "your-api-key"
+.\.venv\Scripts\python.exe run.py
 ```
 
-Open <http://127.0.0.1:8000>. The health endpoint at `/api/health` reports whether a converter was found. Uploaded source files and intermediate candidates are removed after each job; validated PDFs expire after 30 minutes.
+Open <http://127.0.0.1:8000>. The `/api/health` endpoint reports the converter, generation provider, and configured model. Uploaded sources and intermediate candidates are removed after each job; validated PDFs expire after 30 minutes.
 
-The optional evidence bank is JSON. It adds verified material—it is never treated as instructions and cannot modify protected sections.
+Generation uses `gpt-5-mini` by default. Set `RESUME_ADJUSTER_MODEL` to select another Structured Outputs-capable model. Each generated item has a title and two or three implementation-plan bullets. Application validation adds `(Hypothetical Project)` to every generated title and prohibits generated URLs.
 
-```json
-{
-  "projects": [
-    {
-      "title": "Existing or additional project",
-      "url": "https://example.com/project",
-      "bullets": ["Verified factual bullet one", "Verified factual bullet two"]
-    }
-  ],
-  "skills": {
-    "Languages": ["Rust"],
-    "Tools/Infra": ["Kubernetes"]
-  }
-}
-```
-
-The generated PDF can contain projects labeled `Project Idea`. Treat these as a learning plan: build and verify them before converting their bullets to past-tense resume claims.
+The job description and generated project output are processed by OpenAI when hypothetical projects are needed. Existing resume projects and protected sections are not sent in the generation prompt. Hypothetical projects are evaluation or learning-plan content, never completed candidate claims.
 
 ## Tests
 
 ```powershell
-.\.venv\Scripts\python -m pytest
+.\.venv\Scripts\python.exe -m pytest
 ```
 
-The deterministic suite uses redacted DOCX fixtures and a fake converter. To run the real LibreOffice layout integration test as well:
+The deterministic suite uses redacted DOCX fixtures, a fake project generator, and a fake converter. To run the real LibreOffice layout integration test as well:
 
 ```powershell
 $env:RESUME_REFERENCE_DOCX = "C:\path\to\reference.docx"
 $env:RESUME_ADJUSTER_SOFFICE = "C:\Program Files\LibreOffice\program\soffice.exe"
-.\.venv\Scripts\python -m pytest -m integration
+.\.venv\Scripts\python.exe -m pytest -m integration
 ```
 
 Personal resume files and generated output are ignored and should not be committed.

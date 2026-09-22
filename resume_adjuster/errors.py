@@ -29,6 +29,9 @@ class LayoutFailure(ResumeError):
     code = "unresolvable_layout"
 
 
+class GenerationFailure(ResumeError):
+    code = "generation_failure"
+
+
 class JobCancelled(ResumeError):
     code = "cancelled"
-

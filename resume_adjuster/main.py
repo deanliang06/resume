@@ -11,9 +11,9 @@ from .jobs import JobManager
 from .models import Stage
 
 
-def create_app(settings: Settings | None = None, converter=None) -> FastAPI:
+def create_app(settings: Settings | None = None, converter=None, project_generator=None) -> FastAPI:
     settings = settings or Settings.from_env()
-    manager = JobManager(settings, converter)
+    manager = JobManager(settings, converter, project_generator)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -30,19 +30,23 @@ def create_app(settings: Settings | None = None, converter=None) -> FastAPI:
 
     @app.get("/api/health")
     def health():
-        return {"ok": True, "converter_available": manager.converter.available}
+        return {
+            "ok": True,
+            "converter_available": manager.converter.available,
+            "generation_provider": manager.project_generator.provider_name,
+            "generation_model": settings.generation_model,
+        }
 
     @app.post("/api/jobs", status_code=202)
     async def create_job(
         resume: UploadFile = File(...),
         job_description: str = Form(...),
-        evidence_bank: str | None = Form(None),
     ):
         if not resume.filename or not resume.filename.lower().endswith(".docx"):
             raise HTTPException(422, detail={"code": "invalid_input", "message": "Choose a .docx resume."})
         upload = await resume.read(settings.max_upload_bytes + 1)
         try:
-            job = manager.create(upload, job_description, evidence_bank)
+            job = manager.create(upload, job_description)
         except ResumeError as exc:
             raise HTTPException(422, detail={"code": exc.code, "message": str(exc)}) from exc
         return job.public()
@@ -95,8 +99,7 @@ button,a.button{margin-top:1rem;padding:.7rem 1rem;border:0;border-radius:6px;ba
 </style></head><body><main class="shell"><h1>Resume Adjuster</h1><div class="card">
 <form id="form"><label for="resume">DOCX resume</label><input id="resume" name="resume" type="file" accept=".docx" required>
 <label for="description">Job description</label><textarea id="description" name="job_description" required></textarea>
-<p class="help">Existing projects are kept only when they closely match the role. Other slots become clearly labeled project ideas for you to build, with realistic implementation bullets and no invented metrics.</p>
-<details><summary>Optional verified evidence bank</summary><p class="help">JSON with <code>projects</code> (title, optional URL, bullets) and/or <code>skills</code> grouped by the four technical labels. Only include facts you can verify.</p><label for="bank">Evidence JSON</label><textarea id="bank" name="evidence_bank" aria-describedby="bank-help"></textarea></details>
+<p class="help">Existing projects are kept only when they closely match the role. OpenAI generates other slots as visibly labeled hypothetical projects with no invented metrics or URLs. Model-generated ideas are plans, not candidate experience.</p>
 <button id="submit" type="submit">Tailor resume</button></form><div id="status" role="status" aria-live="polite">Ready.</div><div id="result" hidden><div class="actions"><a id="download" class="button">Download new resume</a><button id="retry" type="button">Start another</button></div><p id="notices"></p><iframe id="preview" title="Tailored resume preview"></iframe></div>
 </div></main><script>
 const form=document.querySelector('#form'), submit=document.querySelector('#submit'), statusBox=document.querySelector('#status'), result=document.querySelector('#result');let timer;

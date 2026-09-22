@@ -5,11 +5,11 @@ from fastapi.testclient import TestClient
 from resume_adjuster.config import Settings
 from resume_adjuster.main import create_app
 from resume_adjuster.models import Stage
-from conftest import FakeConverter
+from conftest import FakeConverter, FakeProjectGenerator
 
 
 def make_client(tmp_path):
-    app = create_app(Settings(data_root=tmp_path / "data"), FakeConverter())
+    app = create_app(Settings(data_root=tmp_path / "data"), FakeConverter(), FakeProjectGenerator())
     return TestClient(app), app
 
 
@@ -39,13 +39,13 @@ def test_blank_description_and_corrupt_docx_never_queue(tmp_path, template_path)
         assert app.state.jobs.jobs == {}
 
 
-def test_end_to_end_preview_download_and_cleanup(tmp_path, template_path, evidence_bank):
+def test_end_to_end_preview_download_and_cleanup(tmp_path, template_path):
     client, app = make_client(tmp_path)
     with client:
         response = client.post(
             "/api/jobs",
             files={"resume": ("same-name.docx", template_path.read_bytes(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
-            data={"job_description": "Python Go React AWS SQL", "evidence_bank": evidence_bank},
+            data={"job_description": "Python Go React AWS SQL"},
         )
         assert response.status_code == 202
         job_id = response.json()["id"]

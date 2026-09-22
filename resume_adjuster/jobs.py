@@ -14,31 +14,31 @@ from .config import Settings
 from .converter import LibreOfficeConverter
 from .docx_template import apply_tailoring, parse_resume, validate_docx_package
 from .errors import JobCancelled, LayoutFailure, ResumeError
+from .generation import OpenAIProjectGenerator
 from .models import Job, Stage, TailoredResume
 from .pdf_validation import validate_pdf
-from .tailoring import parse_evidence_bank, tailor
+from .tailoring import tailor
 
 LOG = logging.getLogger("resume_adjuster.jobs")
 
 
 class JobManager:
-    def __init__(self, settings: Settings, converter=None):
+    def __init__(self, settings: Settings, converter=None, project_generator=None):
         self.settings = settings
         self.settings.initialize()
         self.converter = converter or LibreOfficeConverter(settings.converter, settings.conversion_timeout_seconds)
+        self.project_generator = project_generator or OpenAIProjectGenerator(settings.generation_model)
         self.jobs: dict[str, Job] = {}
         self.lock = threading.RLock()
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="resume-worker")
 
-    def create(self, upload: bytes, description: str, bank: str | None) -> Job:
+    def create(self, upload: bytes, description: str) -> Job:
         from .errors import InvalidInput
 
         if not description.strip():
             raise InvalidInput("A job description is required.")
         if len(upload) > self.settings.max_upload_bytes:
             raise InvalidInput("The uploaded DOCX exceeds the 5 MB limit.")
-        # Reject malformed optional JSON before allocating a queued job.
-        parse_evidence_bank(bank)
         job_id = uuid.uuid4().hex
         work_dir = (self.settings.jobs_root / job_id).resolve()
         self._assert_owned(work_dir, self.settings.jobs_root)
@@ -54,7 +54,7 @@ class JobManager:
         job = Job(job_id, work_dir)
         with self.lock:
             self.jobs[job_id] = job
-        self.executor.submit(self._run, job, source, description, bank)
+        self.executor.submit(self._run, job, source, description)
         return job
 
     def get(self, job_id: str) -> Job | None:
@@ -96,14 +96,14 @@ class JobManager:
             current.notices.append("Four supported projects did not fit; the lowest-ranked project was removed.")
             yield copy.deepcopy(current)
 
-    def _run(self, job: Job, source: Path, description: str, bank: str | None) -> None:
+    def _run(self, job: Job, source: Path, description: str) -> None:
         started = time.monotonic()
         try:
             self._stage(job, Stage.VALIDATING)
             validate_docx_package(source, self.settings.max_expanded_bytes)
             _, _, parsed = parse_resume(source)
             self._stage(job, Stage.TAILORING)
-            candidate = tailor(parsed, description, bank)
+            candidate = tailor(parsed, description, self.project_generator)
             last_error: Exception | None = None
             seen = set()
             for attempt, fitted in enumerate(self._fit_candidates(candidate), start=1):
