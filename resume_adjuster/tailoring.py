@@ -3,10 +3,10 @@ from __future__ import annotations
 import re
 from dataclasses import replace
 
-from .docx_template import SKILL_LABELS
 from .errors import GenerationFailure, InvalidInput
 from .generation import ProjectGenerator
 from .models import ParsedResume, Project, TailoredResume
+from .skill_profiles import HOBBIES_LABEL, category_for, skill_labels
 
 WORD_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+#.-]{1,}")
 STOP_WORDS = {
@@ -67,9 +67,15 @@ def _canonical(skill: str) -> str:
     return ALIASES.get(normalized, normalized)
 
 
-def tailor(parsed: ParsedResume, job_description: str, generator: ProjectGenerator) -> TailoredResume:
+def tailor(
+    parsed: ParsedResume,
+    job_description: str,
+    generator: ProjectGenerator,
+    skills_format: str = "standard",
+) -> TailoredResume:
     if not job_description.strip():
         raise InvalidInput("A job description is required.")
+    target_labels = skill_labels(skills_format)
     eligible = [project for project in parsed.projects if len(project.bullets) >= 2]
     wanted = _requirements(job_description)
 
@@ -89,7 +95,7 @@ def tailor(parsed: ParsedResume, job_description: str, generator: ProjectGenerat
     notices = []
     proposed_count = 4 - len(chosen)
     if proposed_count:
-        generated = generator.generate(job_description, proposed_count)
+        generated = generator.generate(job_description, proposed_count, target_labels[:-1])
         if len(generated) != proposed_count or any(not project.proposed for project in generated):
             raise GenerationFailure("The project generator returned an invalid candidate count or unlabeled project.")
         if any(len(project.bullets) not in (2, 3) or project.url for project in generated):
@@ -98,21 +104,36 @@ def tailor(parsed: ParsedResume, job_description: str, generator: ProjectGenerat
         verb = "were" if proposed_count != 1 else "was"
         notices.append(f"{proposed_count} project idea{'s' if proposed_count != 1 else ''} {verb} added as work to build; do not present proposed bullets as completed experience.")
 
+    source_matches_target = all(label in parsed.skills for label in target_labels)
+    technical_values = [
+        value
+        for label, values in parsed.skills.items()
+        if label != HOBBIES_LABEL
+        for value in values
+    ]
     skills: dict[str, list[str]] = {}
     seen: set[str] = set()
-    for label in SKILL_LABELS:
-        values = list(parsed.skills.get(label, []))
+    for label in target_labels:
+        if label == HOBBIES_LABEL:
+            values = list(parsed.skills.get(label, []))
+        elif source_matches_target:
+            values = list(parsed.skills.get(label, []))
+        else:
+            values = [
+                value for value in technical_values
+                if category_for(value, target_labels) == label
+            ]
         result = []
         for value in values:
             canonical = _canonical(value)
-            if canonical in seen and label != "Hobbies/Other":
+            if canonical in seen and label != HOBBIES_LABEL:
                 continue
             result.append(value)
-            if label != "Hobbies/Other":
+            if label != HOBBIES_LABEL:
                 seen.add(canonical)
         # Keep source ordering stable, but bring explicit requirement matches forward.
-        if label != "Hobbies/Other":
+        if label != HOBBIES_LABEL:
             result = sorted(enumerate(result), key=lambda x: (_canonical(x[1]) in wanted, -x[0]), reverse=True)
             result = [value for _, value in result]
         skills[label] = result
-    return TailoredResume(chosen, skills, notices)
+    return TailoredResume(chosen, skills, notices, target_labels)

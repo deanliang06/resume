@@ -38,12 +38,21 @@ class TailoredResume:
     projects: list[Project]
     skills: dict[str, list[str]]
     notices: list[str] = field(default_factory=list)
+    skill_labels: tuple[str, ...] = (
+        "Languages",
+        "Libraries",
+        "Web & Database",
+        "Tools/Infra",
+        "Hobbies/Other",
+    )
 
 
 @dataclass
 class Job:
     id: str
     work_dir: Path
+    output_format: str = "docx"
+    skills_format: str = "standard"
     stage: Stage = Stage.QUEUED
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -64,4 +73,6 @@ class Job:
             "error": self.error,
             "notices": self.notices,
             "ready": self.stage == Stage.READY,
+            "output_format": self.output_format,
+            "skills_format": self.skills_format,
         }

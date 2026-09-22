@@ -45,9 +45,49 @@ def test_alias_dedup_does_not_merge_distinct_languages(template_path, project_ge
 
 def test_rejects_unlabeled_generator_output(template_path):
     class BadGenerator:
-        def generate(self, job_description, count):
+        def generate(self, job_description, count, skill_labels=()):
             return [Project("bad", "Fake", None, ["One", "Two"], 0)] * count
 
     _, _, parsed = parse_resume(template_path)
     with pytest.raises(GenerationFailure, match="unlabeled"):
         tailor(parsed, "Python backend", BadGenerator())
+
+
+def test_ai_assisted_skill_profile_recategorizes_and_guides_generation(template_path):
+    class CapturingGenerator:
+        def __init__(self):
+            self.skill_labels = ()
+
+        def generate(self, job_description, count, skill_labels=()):
+            self.skill_labels = skill_labels
+            return [
+                Project(
+                    f"generated-{index}",
+                    "AI Workflow",
+                    None,
+                    ["Built an API with Python", "Tested the service with Docker"],
+                    20_000 + index,
+                    proposed=True,
+                )
+                for index in range(count)
+            ]
+
+    _, _, parsed = parse_resume(template_path)
+    parsed.skills["Tools/Infra"].append("Cursor")
+    generator = CapturingGenerator()
+    result = tailor(
+        parsed,
+        "Python backend",
+        generator,
+        skills_format="ai_assisted",
+    )
+
+    assert tuple(result.skills) == (
+        "Languages",
+        "Frameworks/Libraries",
+        "Cloud/Developer Tools",
+        "AI Assisted Development",
+        "Hobbies/Other",
+    )
+    assert result.skills["AI Assisted Development"] == ["Cursor"]
+    assert "AI Assisted Development" in generator.skill_labels

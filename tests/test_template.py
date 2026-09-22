@@ -61,3 +61,25 @@ def test_three_project_fallback_removes_whole_block(template_path, tmp_path, pro
     apply_tailoring(template_path, output, candidate)
     _, _, reparsed = parse_resume(output)
     assert len(reparsed.projects) == 3
+
+
+def test_can_switch_docx_to_ai_assisted_skill_rows(
+    template_path,
+    tmp_path,
+    project_generator,
+):
+    _, _, parsed = parse_resume(template_path)
+    parsed.skills["Tools/Infra"].append("Cursor")
+    candidate = tailor(
+        parsed,
+        "Python AWS backend",
+        project_generator,
+        skills_format="ai_assisted",
+    )
+    output = tmp_path / "ai-skills.docx"
+    apply_tailoring(template_path, output, candidate)
+    _, mapping, reparsed = parse_resume(output)
+
+    assert "AI Assisted Development" in mapping.skill_indexes
+    assert reparsed.skills["AI Assisted Development"] == ["Cursor"]
+    assert "AWS" in reparsed.skills["Cloud/Developer Tools"]

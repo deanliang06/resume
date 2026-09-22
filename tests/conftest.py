@@ -38,7 +38,7 @@ def template_path(tmp_path: Path) -> Path:
 class FakeProjectGenerator:
     provider_name = "test generator"
 
-    def generate(self, job_description: str, count: int):
+    def generate(self, job_description: str, count: int, skill_labels=()):
         from resume_adjuster.models import Project
         return [Project(
             f"hypothetical-{index + 1}",
