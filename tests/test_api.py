@@ -5,11 +5,11 @@ from fastapi.testclient import TestClient
 from resume_adjuster.config import Settings
 from resume_adjuster.main import create_app
 from resume_adjuster.models import Stage
-from conftest import FakeConverter, FakeProjectGenerator
+from conftest import FakeProjectGenerator
 
 
 def make_client(tmp_path):
-    app = create_app(Settings(data_root=tmp_path / "data"), FakeConverter(), FakeProjectGenerator())
+    app = create_app(Settings(data_root=tmp_path / "data"), FakeProjectGenerator())
     return TestClient(app), app
 
 
@@ -39,7 +39,7 @@ def test_blank_description_and_corrupt_docx_never_queue(tmp_path, template_path)
         assert app.state.jobs.jobs == {}
 
 
-def test_end_to_end_preview_download_and_cleanup(tmp_path, template_path):
+def test_end_to_end_docx_download_and_cleanup(tmp_path, template_path):
     client, app = make_client(tmp_path)
     with client:
         response = client.post(
@@ -51,8 +51,10 @@ def test_end_to_end_preview_download_and_cleanup(tmp_path, template_path):
         job_id = response.json()["id"]
         status = wait_for_terminal(client, job_id)
         assert status["stage"] == "ready", status
-        assert client.get(f"/api/jobs/{job_id}/preview").headers["content-type"] == "application/pdf"
-        assert client.get(f"/api/jobs/{job_id}/download").status_code == 200
+        download = client.get(f"/api/jobs/{job_id}/download")
+        assert download.status_code == 200
+        assert download.headers["content-type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        assert download.content.startswith(b"PK")
         assert not (app.state.jobs.settings.jobs_root / job_id).exists()
 
 

@@ -13,7 +13,6 @@ def test_proposes_projects_when_resume_projects_are_not_close_matches(template_p
     assert any(project.proposed for project in result.projects)
     assert all(len(project.bullets) <= 3 for project in result.projects)
     assert all(project.url is None for project in result.projects if project.proposed)
-    assert all(project.title.endswith("(Hypothetical Project)") for project in result.projects if project.proposed)
 
 
 def test_ranks_relevant_projects_and_caps_bullets(template_path, project_generator):

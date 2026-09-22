@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import logging
 import shutil
 import threading
@@ -11,23 +10,23 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .config import Settings
-from .converter import LibreOfficeConverter
 from .docx_template import apply_tailoring, parse_resume, validate_docx_package
-from .errors import JobCancelled, LayoutFailure, ResumeError
+from .errors import JobCancelled, ResumeError
 from .generation import OpenAIProjectGenerator
-from .models import Job, Stage, TailoredResume
-from .pdf_validation import validate_pdf
+from .models import Job, Stage
 from .tailoring import tailor
 
 LOG = logging.getLogger("resume_adjuster.jobs")
 
 
 class JobManager:
-    def __init__(self, settings: Settings, converter=None, project_generator=None):
+    def __init__(self, settings: Settings, project_generator=None):
         self.settings = settings
         self.settings.initialize()
-        self.converter = converter or LibreOfficeConverter(settings.converter, settings.conversion_timeout_seconds)
-        self.project_generator = project_generator or OpenAIProjectGenerator(settings.generation_model)
+        self.project_generator = project_generator or OpenAIProjectGenerator(
+            model=settings.generation_model,
+            base_url=settings.generation_base_url,
+        )
         self.jobs: dict[str, Job] = {}
         self.lock = threading.RLock()
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="resume-worker")
@@ -83,19 +82,6 @@ class JobManager:
         job.updated_at = datetime.now(timezone.utc)
         LOG.info("job=%s stage=%s", job.id, stage)
 
-    def _fit_candidates(self, candidate: TailoredResume):
-        current = copy.deepcopy(candidate)
-        yield current
-        # Remove optional third bullets from least-relevant projects first.
-        for project in reversed(current.projects):
-            if len(project.bullets) == 3:
-                project.bullets.pop()
-                yield copy.deepcopy(current)
-        if len(current.projects) == 4:
-            current.projects.pop()
-            current.notices.append("Four supported projects did not fit; the lowest-ranked project was removed.")
-            yield copy.deepcopy(current)
-
     def _run(self, job: Job, source: Path, description: str) -> None:
         started = time.monotonic()
         try:
@@ -104,41 +90,22 @@ class JobManager:
             _, _, parsed = parse_resume(source)
             self._stage(job, Stage.TAILORING)
             candidate = tailor(parsed, description, self.project_generator)
-            last_error: Exception | None = None
-            seen = set()
-            for attempt, fitted in enumerate(self._fit_candidates(candidate), start=1):
-                if attempt > self.settings.max_render_attempts:
-                    break
-                if time.monotonic() - started > self.settings.job_timeout_seconds:
-                    raise ResumeError("The job exceeded its five-minute deadline.", code="timeout")
-                signature = repr([(p.title, p.bullets) for p in fitted.projects]) + repr(fitted.skills)
-                if signature in seen:
-                    continue
-                seen.add(signature)
-                self._stage(job, Stage.RENDERING)
-                docx_path = job.work_dir / f"candidate-{attempt}.docx"
-                pdf_path = job.work_dir / f"candidate-{attempt}.pdf"
-                apply_tailoring(source, docx_path, fitted)
-                self.converter.convert(docx_path, pdf_path, job.work_dir / f"profile-{attempt}")
-                self._stage(job, Stage.CHECKING)
-                try:
-                    validate_pdf(pdf_path, fitted)
-                except LayoutFailure as exc:
-                    last_error = exc
-                    continue
-                result = (self.settings.results_root / f"{job.id}.pdf").resolve()
-                self._assert_owned(result, self.settings.results_root)
-                temporary = result.with_suffix(".tmp")
-                shutil.copyfile(pdf_path, temporary)
-                temporary.replace(result)
-                job.result = result
-                job.notices = fitted.notices
-                job.expires_at = datetime.now(timezone.utc) + timedelta(seconds=self.settings.result_ttl_seconds)
-                self._stage(job, Stage.READY)
-                return
-            if last_error:
-                raise LayoutFailure(f"No candidate satisfied the one-page layout rules: {last_error}")
-            raise LayoutFailure("No valid layout candidate could be produced.")
+            if time.monotonic() - started > self.settings.job_timeout_seconds:
+                raise ResumeError("The job exceeded its five-minute deadline.", code="timeout")
+            self._stage(job, Stage.WRITING)
+            candidate_path = job.work_dir / "candidate.docx"
+            apply_tailoring(source, candidate_path, candidate)
+            validate_docx_package(candidate_path, self.settings.max_expanded_bytes)
+            parse_resume(candidate_path)
+            result = (self.settings.results_root / f"{job.id}.docx").resolve()
+            self._assert_owned(result, self.settings.results_root)
+            temporary = result.with_suffix(".tmp")
+            shutil.copyfile(candidate_path, temporary)
+            temporary.replace(result)
+            job.result = result
+            job.notices = candidate.notices
+            job.expires_at = datetime.now(timezone.utc) + timedelta(seconds=self.settings.result_ttl_seconds)
+            self._stage(job, Stage.READY)
         except JobCancelled as exc:
             job.stage = Stage.CANCELLED
             job.error_code = exc.code

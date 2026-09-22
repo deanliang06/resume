@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
-import fitz
 import pytest
 from docx import Document
 from docx.enum.section import WD_SECTION
@@ -35,28 +33,6 @@ def template_path(tmp_path: Path) -> Path:
         doc.add_paragraph(text, style=style)
     doc.save(path)
     return path
-
-
-class FakeConverter:
-    available = True
-
-    def convert(self, source: Path, output: Path, profile: Path) -> None:
-        from docx import Document
-        document = Document(source)
-        pdf = fitz.open()
-        page = pdf.new_page(width=612, height=792)
-        y = 80
-        for paragraph in document.paragraphs:
-            text = paragraph.text.strip()
-            if not text:
-                continue
-            page.insert_text((72, y), text, fontsize=9)
-            for url in re.findall(r"https?://[^\s)]+", text):
-                page.insert_link({"kind": fitz.LINK_URI, "from": fitz.Rect(72, y - 10, 300, y + 2), "uri": url})
-            y += 14
-        output.parent.mkdir(parents=True, exist_ok=True)
-        pdf.save(output)
-        pdf.close()
 
 
 class FakeProjectGenerator:

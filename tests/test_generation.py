@@ -6,18 +6,19 @@ from resume_adjuster.errors import GenerationFailure
 from resume_adjuster.generation import GeneratedProject, GeneratedProjectBatch, OpenAIProjectGenerator
 
 
-class FakeResponses:
+class FakeCompletions:
     def __init__(self, parsed):
         self.parsed = parsed
         self.request = None
 
-    def parse(self, **kwargs):
+    def create(self, **kwargs):
         self.request = kwargs
-        return SimpleNamespace(output_parsed=self.parsed)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=self.parsed.model_dump_json()))])
 
 
 def client_for(parsed):
-    return SimpleNamespace(responses=FakeResponses(parsed))
+    completions = FakeCompletions(parsed)
+    return SimpleNamespace(chat=SimpleNamespace(completions=completions), captured=completions)
 
 
 def test_openai_generator_uses_typed_schema_and_forces_hypothetical_label():
@@ -27,7 +28,8 @@ def test_openai_generator_uses_typed_schema_and_forces_hypothetical_label():
     )])
     client = client_for(parsed)
     result = OpenAIProjectGenerator(client=client).generate("Python queues", 1)
-    assert client.responses.request["text_format"] is GeneratedProjectBatch
+    assert client.captured.request["response_format"]["type"] == "json_schema"
+    assert client.captured.request["extra_body"]["provider"]["require_parameters"] is True
     assert result[0].title == "Queue Simulator (Hypothetical Project)"
     assert result[0].proposed is True
     assert result[0].url is None

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,8 +13,6 @@ class Settings:
     result_ttl_seconds: int = 30 * 60
     abandoned_ttl_seconds: int = 60 * 60
     job_timeout_seconds: int = 5 * 60
-    conversion_timeout_seconds: int = 60
-    max_render_attempts: int = 12
 
     @property
     def jobs_root(self) -> Path:
@@ -26,13 +23,12 @@ class Settings:
         return self.data_root / "results"
 
     @property
-    def converter(self) -> str | None:
-        configured = os.getenv("RESUME_ADJUSTER_SOFFICE")
-        return configured or shutil.which("soffice") or shutil.which("libreoffice")
+    def generation_model(self) -> str:
+        return os.getenv("RESUME_ADJUSTER_MODEL", "deepseek/deepseek-v4-flash-0731")
 
     @property
-    def generation_model(self) -> str:
-        return os.getenv("RESUME_ADJUSTER_MODEL", "gpt-5-mini")
+    def generation_base_url(self) -> str:
+        return os.getenv("RESUME_ADJUSTER_BASE_URL", "https://openrouter.ai/api/v1")
 
     @classmethod
     def from_env(cls) -> "Settings":

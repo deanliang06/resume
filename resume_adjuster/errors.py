@@ -21,14 +21,6 @@ class InsufficientEvidence(ResumeError):
     code = "insufficient_evidence"
 
 
-class ConversionFailure(ResumeError):
-    code = "conversion_failure"
-
-
-class LayoutFailure(ResumeError):
-    code = "unresolvable_layout"
-
-
 class GenerationFailure(ResumeError):
     code = "generation_failure"
 
