@@ -13,7 +13,9 @@ from .config import Settings
 from .docx_template import apply_tailoring, parse_resume, validate_docx_package
 from .errors import JobCancelled, ResumeError
 from .generation import OpenAIProjectGenerator
+from .latex_template import apply_latex_tailoring, parse_latex
 from .models import Job, Stage
+from .skill_profiles import skill_labels
 from .tailoring import tailor
 
 LOG = logging.getLogger("resume_adjuster.jobs")
@@ -31,11 +33,12 @@ class JobManager:
         self.lock = threading.RLock()
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="resume-worker")
 
-    def create(self, upload: bytes, description: str) -> Job:
+    def create(self, upload: bytes, description: str, skills_format: str = "standard") -> Job:
         from .errors import InvalidInput
 
         if not description.strip():
             raise InvalidInput("A job description is required.")
+        skill_labels(skills_format)
         if len(upload) > self.settings.max_upload_bytes:
             raise InvalidInput("The uploaded DOCX exceeds the 5 MB limit.")
         job_id = uuid.uuid4().hex
@@ -50,10 +53,42 @@ class JobManager:
         except Exception:
             self._safe_rmtree(work_dir, self.settings.jobs_root)
             raise
-        job = Job(job_id, work_dir)
+        job = Job(job_id, work_dir, skills_format=skills_format)
         with self.lock:
             self.jobs[job_id] = job
         self.executor.submit(self._run, job, source, description)
+        return job
+
+    def create_latex(
+        self,
+        source_text: str,
+        description: str,
+        skills_format: str = "standard",
+    ) -> Job:
+        from .errors import InvalidInput
+
+        if not description.strip():
+            raise InvalidInput("A job description is required.")
+        skill_labels(skills_format)
+        source_bytes = source_text.encode("utf-8")
+        if len(source_bytes) > self.settings.max_upload_bytes:
+            raise InvalidInput("The LaTeX source exceeds the 5 MB limit.")
+        template, _ = parse_latex(source_text)
+        job_id = uuid.uuid4().hex
+        work_dir = (self.settings.jobs_root / job_id).resolve()
+        self._assert_owned(work_dir, self.settings.jobs_root)
+        work_dir.mkdir(parents=True)
+        source = work_dir / "source.tex"
+        source.write_text(template.source, encoding="utf-8")
+        job = Job(
+            job_id,
+            work_dir,
+            output_format="latex",
+            skills_format=skills_format,
+        )
+        with self.lock:
+            self.jobs[job_id] = job
+        self.executor.submit(self._run_latex, job, source, description)
         return job
 
     def get(self, job_id: str) -> Job | None:
@@ -89,7 +124,12 @@ class JobManager:
             validate_docx_package(source, self.settings.max_expanded_bytes)
             _, _, parsed = parse_resume(source)
             self._stage(job, Stage.TAILORING)
-            candidate = tailor(parsed, description, self.project_generator)
+            candidate = tailor(
+                parsed,
+                description,
+                self.project_generator,
+                job.skills_format,
+            )
             if time.monotonic() - started > self.settings.job_timeout_seconds:
                 raise ResumeError("The job exceeded its five-minute deadline.", code="timeout")
             self._stage(job, Stage.WRITING)
@@ -101,6 +141,50 @@ class JobManager:
             self._assert_owned(result, self.settings.results_root)
             temporary = result.with_suffix(".tmp")
             shutil.copyfile(candidate_path, temporary)
+            temporary.replace(result)
+            job.result = result
+            job.notices = candidate.notices
+            job.expires_at = datetime.now(timezone.utc) + timedelta(seconds=self.settings.result_ttl_seconds)
+            self._stage(job, Stage.READY)
+        except JobCancelled as exc:
+            job.stage = Stage.CANCELLED
+            job.error_code = exc.code
+            job.error = str(exc)
+        except ResumeError as exc:
+            job.stage = Stage.FAILED
+            job.error_code = exc.code
+            job.error = str(exc)
+        except Exception:
+            LOG.exception("job=%s unexpected failure", job.id)
+            job.stage = Stage.FAILED
+            job.error_code = "internal_error"
+            job.error = "An unexpected internal error occurred."
+        finally:
+            job.updated_at = datetime.now(timezone.utc)
+            self._safe_rmtree(job.work_dir, self.settings.jobs_root)
+            LOG.info("job=%s final=%s duration=%.3f", job.id, job.stage, time.monotonic() - started)
+
+    def _run_latex(self, job: Job, source: Path, description: str) -> None:
+        started = time.monotonic()
+        try:
+            self._stage(job, Stage.VALIDATING)
+            template, parsed = parse_latex(source.read_text(encoding="utf-8"))
+            self._stage(job, Stage.TAILORING)
+            candidate = tailor(
+                parsed,
+                description,
+                self.project_generator,
+                job.skills_format,
+            )
+            if time.monotonic() - started > self.settings.job_timeout_seconds:
+                raise ResumeError("The job exceeded its five-minute deadline.", code="timeout")
+            self._stage(job, Stage.WRITING)
+            output = apply_latex_tailoring(template, candidate)
+            parse_latex(output)
+            result = (self.settings.results_root / f"{job.id}.tex").resolve()
+            self._assert_owned(result, self.settings.results_root)
+            temporary = result.with_suffix(".tmp")
+            temporary.write_text(output, encoding="utf-8")
             temporary.replace(result)
             job.result = result
             job.notices = candidate.notices

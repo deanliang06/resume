@@ -16,9 +16,10 @@ from docx.text.paragraph import Paragraph
 
 from .errors import InvalidInput, UnsupportedTemplate
 from .models import ParsedResume, Project, TailoredResume
+from .skill_profiles import SKILL_PROFILES, STANDARD_SKILL_LABELS
 
 SECTION_NAMES = ("Education:", "Experience:", "Projects:", "Skills:")
-SKILL_LABELS = ("Languages", "Libraries", "Web & Database", "Tools/Infra", "Hobbies/Other")
+SKILL_LABELS = STANDARD_SKILL_LABELS
 URL_RE = re.compile(r"https?://[^\s)]+/?")
 
 
@@ -83,14 +84,19 @@ def map_template(document: DocumentType) -> TemplateMap:
             raise UnsupportedTemplate("Each project must contain at least one list bullet.")
         blocks.append((start, end))
 
-    skill_indexes: dict[str, int] = {}
-    for label in SKILL_LABELS:
-        matches = [i for i in range(skills_start + 1, len(texts)) if texts[i].startswith(label + ":")]
-        if len(matches) != 1:
-            raise UnsupportedTemplate(f"Expected exactly one {label} skill row.")
-        skill_indexes[label] = matches[0]
-    if list(skill_indexes.values()) != sorted(skill_indexes.values()):
-        raise UnsupportedTemplate("Skill rows are not in the expected order.")
+    skill_indexes: dict[str, int] | None = None
+    for profile_labels in SKILL_PROFILES.values():
+        candidate: dict[str, int] = {}
+        for label in profile_labels:
+            matches = [i for i in range(skills_start + 1, len(texts)) if texts[i].startswith(label + ":")]
+            if len(matches) != 1:
+                break
+            candidate[label] = matches[0]
+        if len(candidate) == len(profile_labels) and list(candidate.values()) == sorted(candidate.values()):
+            skill_indexes = candidate
+            break
+    if skill_indexes is None:
+        raise UnsupportedTemplate("The Skills section does not match a supported Technical Skills format.")
     return TemplateMap(section_indexes, tuple(heading_indexes), tuple(blocks), skill_indexes)
 
 
@@ -227,10 +233,10 @@ def apply_tailoring(source: Path, output: Path, tailored: TailoredResume) -> Non
 
     # Re-map after project deletions, then update only the four technical rows.
     mapping_after = map_template(document)
-    for label in SKILL_LABELS[:-1]:
-        values = tailored.skills.get(label)
-        if values is not None:
-            _set_paragraph_text(document.paragraphs[mapping_after.skill_indexes[label]], ", ".join(values), label=label)
+    source_indexes = list(mapping_after.skill_indexes.values())
+    for index, label in zip(source_indexes[:-1], tailored.skill_labels[:-1]):
+        values = tailored.skills.get(label, [])
+        _set_paragraph_text(document.paragraphs[index], ", ".join(values), label=label)
     if before != protected_digest(document, map_template(document)):
         raise UnsupportedTemplate("A protected part of the document changed during editing.")
     document.save(output)

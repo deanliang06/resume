@@ -66,3 +66,48 @@ def test_sparse_evidence_returns_labeled_project_ideas(tmp_path, template_path):
         assert status["stage"] == "ready"
         assert "project idea" in " ".join(status["notices"]).lower()
         assert client.get(f"/api/jobs/{status['id']}/download").status_code == 200
+
+
+def test_end_to_end_latex_source_result(tmp_path):
+    source = r"""
+\documentclass{article}
+\begin{document}
+\section{Projects}
+\resumeSubHeadingListStart
+\resumeProjectHeading{\textbf{Cloud API} $|$ \emph{Python, FastAPI}}{}
+\resumeItemListStart
+\resumeItem{Built a Python FastAPI backend}
+\resumeItem{Deployed the API with Docker}
+\resumeItemListEnd
+\resumeSubHeadingListEnd
+\section{Technical Skills}
+\textbf{Languages}{: Python, Go} \\
+\textbf{Libraries}{: FastAPI, Pandas} \\
+\textbf{Web \& Database}{: PostgreSQL, REST} \\
+\textbf{Tools/Infra}{: AWS, Docker} \\
+\textbf{Hobbies/Other}{: Chess}
+\end{document}
+"""
+    client, app = make_client(tmp_path)
+    with client:
+        response = client.post(
+            "/api/jobs",
+            data={
+                "mode": "latex",
+                "skills_format": "ai_assisted",
+                "latex_source": source,
+                "job_description": "Python FastAPI PostgreSQL AWS Docker backend API",
+            },
+        )
+        assert response.status_code == 202, response.json()
+        status = wait_for_terminal(client, response.json()["id"])
+        assert status["stage"] == "ready", status
+        assert status["output_format"] == "latex"
+        download = client.get(f"/api/jobs/{status['id']}/download")
+        assert download.status_code == 200
+        assert download.headers["content-type"].startswith("text/plain")
+        assert r"\section{Projects}" in download.text
+        assert r"\textbf{AI Assisted Development}" in download.text
+        assert r"\textbf{Cloud/Developer Tools}" in download.text
+        assert "(Hypothetical Project)" in download.text
+        assert not (app.state.jobs.settings.jobs_root / status["id"]).exists()

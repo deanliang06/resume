@@ -27,9 +27,14 @@ def test_openai_generator_uses_typed_schema_and_forces_hypothetical_label():
         bullets=["Build a queue simulator", "Add deterministic failure tests"],
     )])
     client = client_for(parsed)
-    result = OpenAIProjectGenerator(client=client).generate("Python queues", 1)
+    result = OpenAIProjectGenerator(client=client).generate(
+        "Python queues",
+        1,
+        ("Languages", "AI Assisted Development"),
+    )
     assert client.captured.request["response_format"]["type"] == "json_schema"
     assert client.captured.request["extra_body"]["provider"]["require_parameters"] is True
+    assert "AI Assisted Development" in client.captured.request["messages"][0]["content"]
     assert result[0].proposed is True
     assert result[0].url is None
 
